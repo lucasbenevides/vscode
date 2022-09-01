@@ -316,27 +316,22 @@ const IGNORE_ENCODINGS = ['ascii', 'utf-16', 'utf-32'];
  * Guesses the encoding from buffer.
  */
 async function guessEncodingByBuffer(buffer: VSBuffer): Promise<string | null> {
-	const jschardet = await import('jschardet');
+	const nodechardet = await import('chardet');
 
 	// ensure to limit buffer for guessing due to https://github.com/aadsm/jschardet/issues/53
 	const limitedBuffer = buffer.slice(0, AUTO_ENCODING_GUESS_MAX_BYTES);
 
-	// before guessing jschardet calls toString('binary') on input if it is a Buffer,
-	// since we are using it inside browser environment as well we do conversion ourselves
-	// https://github.com/aadsm/jschardet/blob/v2.1.1/src/index.js#L36-L40
-	const binaryString = encodeLatin1(limitedBuffer.buffer);
-
-	const guessed = jschardet.detect(binaryString);
-	if (!guessed || !guessed.encoding) {
+	const guessed = nodechardet.detect(limitedBuffer.buffer);
+	if (!guessed) {
 		return null;
 	}
 
-	const enc = guessed.encoding.toLowerCase();
+	const enc = guessed.toLowerCase();
 	if (0 <= IGNORE_ENCODINGS.indexOf(enc)) {
 		return null; // see comment above why we ignore some encodings
 	}
 
-	return toIconvLiteEncoding(guessed.encoding);
+	return toIconvLiteEncoding(guessed);
 }
 
 const JSCHARDET_TO_ICONV_ENCODINGS: { [name: string]: string } = {
@@ -349,15 +344,6 @@ function toIconvLiteEncoding(encodingName: string): string {
 	const mapped = JSCHARDET_TO_ICONV_ENCODINGS[normalizedEncodingName];
 
 	return mapped || normalizedEncodingName;
-}
-
-function encodeLatin1(buffer: Uint8Array): string {
-	let result = '';
-	for (let i = 0; i < buffer.length; i++) {
-		result += String.fromCharCode(buffer[i]);
-	}
-
-	return result;
 }
 
 /**
