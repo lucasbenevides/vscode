@@ -28,18 +28,30 @@ export interface Option<OptionType> {
 	cat?: keyof typeof helpCategories;
 }
 
+interface CommandOption<T> {
+	type: 'subcommand';
+	description?: string;
+	deprecationMessage?: string;
+	options: OptionDescriptions<Required<T>>;
+}
+
 export type OptionDescriptions<T> = {
-	[P in keyof T]: Option<OptionTypeName<T[P]>>;
+	[P in keyof T]:
+	T[P] extends boolean ? Option<'boolean'> :
+	T[P] extends string ? Option<'string'> :
+	T[P] extends string[] ? Option<'string[]'> :
+	CommandOption<T[P]>
 };
 
-type OptionTypeName<T> =
-	T extends boolean ? 'boolean' :
-	T extends string ? 'string' :
-	T extends string[] ? 'string[]' :
-	T extends undefined ? 'undefined' :
-	'unknown';
-
 export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
+	'tunnel': {
+		type: 'subcommand',
+		description: 'Make the current machine accessible from vscode.dev or other machines through a secure tunnel',
+		options: {
+			'log': { type: 'string', args: 'level', description: localize('log', "Log level to use. Default is 'info'. Allowed values are 'critical', 'error', 'warn', 'info', 'debug', 'trace', 'off'.") },
+		}
+	},
+
 	'diff': { type: 'boolean', cat: 'o', alias: 'd', args: ['file', 'file'], description: localize('diff', "Compare two files with each other.") },
 	'merge': { type: 'boolean', cat: 'o', alias: 'm', args: ['path1', 'path2', 'base', 'result'], description: localize('merge', "Perform a three-way merge by providing paths for two modified versions of a file, the common origin of both modified versions and the output file to save merge results.") },
 	'add': { type: 'boolean', cat: 'o', alias: 'a', args: 'folder', description: localize('add', "Add folder(s) to the last active window.") },
@@ -176,27 +188,39 @@ const ignoringReporter: ErrorReporter = {
 };
 
 export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, errorReporter: ErrorReporter = ignoringReporter): T {
+	const firstArg = args.find(a => a.length > 0 && a[0] !== '-');
+
 	const alias: { [key: string]: string } = {};
 	const string: string[] = ['_'];
 	const boolean: string[] = [];
 	for (const optionId in options) {
 		const o = options[optionId];
-		if (o.alias) {
-			alias[optionId] = o.alias;
-		}
-
-		if (o.type === 'string' || o.type === 'string[]') {
-			string.push(optionId);
-			if (o.deprecates) {
-				string.push(...o.deprecates);
+		if (o.type === 'subcommand') {
+			if (optionId === firstArg) {
+				const subcommandOptions = parseArgs(args.filter(a => a !== optionId), o.options, errorReporter);
+				return <T>{
+					[optionId]: subcommandOptions
+				};
 			}
-		} else if (o.type === 'boolean') {
-			boolean.push(optionId);
-			if (o.deprecates) {
-				boolean.push(...o.deprecates);
+		} else {
+			if (o.alias) {
+				alias[optionId] = o.alias;
+			}
+
+			if (o.type === 'string' || o.type === 'string[]') {
+				string.push(optionId);
+				if (o.deprecates) {
+					string.push(...o.deprecates);
+				}
+			} else if (o.type === 'boolean') {
+				boolean.push(optionId);
+				if (o.deprecates) {
+					boolean.push(...o.deprecates);
+				}
 			}
 		}
 	}
+
 	// remove aliases to avoid confusion
 	const parsedArgs = minimist(args, { string, boolean, alias });
 
@@ -210,6 +234,9 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 
 	for (const optionId in options) {
 		const o = options[optionId];
+		if (o.type === 'subcommand') {
+			continue;
+		}
 		if (o.alias) {
 			delete remainingArgs[o.alias];
 		}
@@ -283,14 +310,17 @@ function formatUsage(optionId: string, option: Option<any>) {
 
 // exported only for testing
 export function formatOptions(options: OptionDescriptions<any>, columns: number): string[] {
-	let maxLength = 0;
 	const usageTexts: [string, string][] = [];
 	for (const optionId in options) {
 		const o = options[optionId];
 		const usageText = formatUsage(optionId, o);
-		maxLength = Math.max(maxLength, usageText.length);
 		usageTexts.push([usageText, o.description!]);
 	}
+	return formatUsageTexts(usageTexts, columns);
+}
+
+function formatUsageTexts(usageTexts: [string, string][], columns: number) {
+	const maxLength = usageTexts.reduce((previous, e) => Math.max(previous, e[0].length), 12);
 	const argLength = maxLength + 2/*left padding*/ + 1/*right padding*/;
 	if (columns - argLength < 25) {
 		// Use a condensed version on narrow terminals
@@ -342,9 +372,14 @@ export function buildHelpMessage(productName: string, executableName: string, ve
 		help.push('');
 	}
 	const optionsByCategory: { [P in keyof typeof helpCategories]?: OptionDescriptions<any> } = {};
+	const subcommands: { command: string; description: string }[] = [];
 	for (const optionId in options) {
 		const o = options[optionId];
-		if (o.description && o.cat) {
+		if (o.type === 'subcommand') {
+			if (o.description) {
+				subcommands.push({ command: optionId, description: o.description });
+			}
+		} else if (o.description && o.cat) {
 			let optionsByCat = optionsByCategory[o.cat];
 			if (!optionsByCat) {
 				optionsByCategory[o.cat] = optionsByCat = {};
@@ -363,6 +398,13 @@ export function buildHelpMessage(productName: string, executableName: string, ve
 			help.push('');
 		}
 	}
+
+	if (subcommands.length) {
+		help.push(localize('subcommands', "Subcommands"));
+		help.push(...formatUsageTexts(subcommands.map(s => [s.command, s.description]), columns));
+		help.push('');
+	}
+
 	return help.join('\n');
 }
 
