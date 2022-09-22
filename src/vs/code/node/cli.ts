@@ -50,6 +50,12 @@ export async function main(argv: string[]): Promise<any> {
 		return;
 	}
 
+	if (args.tunnel) {
+		// TODO: launch the tunnel exe
+		console.error('tunnel not yet supported');
+		return;
+	}
+
 	// Help
 	if (args.help) {
 		const executable = `${product.applicationName}${isWindows ? '.exe' : ''}`;

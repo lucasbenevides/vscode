@@ -68,7 +68,12 @@ export function parseMainProcessArgv(processArgv: string[]): NativeParsedArgs {
  * Use this to parse raw code CLI process.argv such as: `Electron cli.js . --verbose --wait`
  */
 export function parseCLIProcessArgv(processArgv: string[]): NativeParsedArgs {
-	const [, , ...args] = processArgv; // remove the first non-option argument: it's always the app location
+	let [, , ...args] = processArgv; // remove the first non-option argument: it's always the app location
+
+	// If dev, remove the first non-option argument: it's the app location
+	if (process.env['VSCODE_DEV']) {
+		args = stripAppPath(args) || [];
+	}
 
 	return parseAndValidate(args, true);
 }

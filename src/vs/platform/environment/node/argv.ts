@@ -26,6 +26,7 @@ export interface Option<OptionType> {
 	deprecationMessage?: string;
 	allowEmptyValue?: boolean;
 	cat?: keyof typeof helpCategories;
+	global?: boolean;
 }
 
 interface CommandOption<T> {
@@ -92,7 +93,7 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'inspect-extensions': { type: 'string', allowEmptyValue: true, deprecates: ['debugPluginHost'], args: 'port', cat: 't', description: localize('inspect-extensions', "Allow debugging and profiling of extensions. Check the developer tools for the connection URI.") },
 	'inspect-brk-extensions': { type: 'string', allowEmptyValue: true, deprecates: ['debugBrkPluginHost'], args: 'port', cat: 't', description: localize('inspect-brk-extensions', "Allow debugging and profiling of extensions with the extension host being paused after start. Check the developer tools for the connection URI.") },
 	'disable-gpu': { type: 'boolean', cat: 't', description: localize('disableGPU', "Disable GPU hardware acceleration.") },
-	'ms-enable-electron-run-as-node': { type: 'boolean' },
+	'ms-enable-electron-run-as-node': { type: 'boolean', global: true },
 	'max-memory': { type: 'string', cat: 't', description: localize('maxMemory', "Max memory size for a window (in Mbytes)."), args: 'memory' },
 	'telemetry': { type: 'boolean', cat: 't', description: localize('telemetry', "Shows all telemetry events which VS code collects.") },
 
@@ -193,14 +194,13 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 	const alias: { [key: string]: string } = {};
 	const string: string[] = ['_'];
 	const boolean: string[] = [];
+	const globalOptions: OptionDescriptions<any> = {};
+	let command: CommandOption<any> | undefined = undefined;
 	for (const optionId in options) {
 		const o = options[optionId];
 		if (o.type === 'subcommand') {
 			if (optionId === firstArg) {
-				const subcommandOptions = parseArgs(args.filter(a => a !== optionId), o.options, errorReporter);
-				return <T>{
-					[optionId]: subcommandOptions
-				};
+				command = o;
 			}
 		} else {
 			if (o.alias) {
@@ -218,8 +218,23 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 					boolean.push(...o.deprecates);
 				}
 			}
+			if (o.global) {
+				globalOptions[optionId] = o;
+			}
 		}
 	}
+	if (command && firstArg) {
+		const options = globalOptions;
+		for (const optionId in command.options) {
+			options[optionId] = command.options[optionId];
+		}
+		const newArgs = args.filter(a => a !== firstArg);
+		const subcommandOptions = parseArgs(newArgs, options, errorReporter);
+		return <T>{
+			[firstArg]: subcommandOptions
+		};
+	}
+
 
 	// remove aliases to avoid confusion
 	const parsedArgs = minimist(args, { string, boolean, alias });
