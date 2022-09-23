@@ -29,7 +29,7 @@ export interface Option<OptionType> {
 	global?: boolean;
 }
 
-interface CommandOption<T> {
+export interface Subcommand<T> {
 	type: 'subcommand';
 	description?: string;
 	deprecationMessage?: string;
@@ -41,7 +41,7 @@ export type OptionDescriptions<T> = {
 	T[P] extends boolean ? Option<'boolean'> :
 	T[P] extends string ? Option<'string'> :
 	T[P] extends string[] ? Option<'string[]'> :
-	CommandOption<T[P]>
+	Subcommand<T[P]>
 };
 
 export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
@@ -179,9 +179,11 @@ export interface ErrorReporter {
 	onMultipleValues(id: string, usedValue: string): void;
 	onEmptyValue(id: string): void;
 	onDeprecatedOption(deprecatedId: string, message: string): void;
+
+	getSubcommandReporter?(commmand: string): ErrorReporter;
 }
 
-const ignoringReporter: ErrorReporter = {
+const ignoringReporter = {
 	onUnknownOption: () => { },
 	onMultipleValues: () => { },
 	onEmptyValue: () => { },
@@ -195,7 +197,7 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 	const string: string[] = ['_'];
 	const boolean: string[] = [];
 	const globalOptions: OptionDescriptions<any> = {};
-	let command: CommandOption<any> | undefined = undefined;
+	let command: Subcommand<any> | undefined = undefined;
 	for (const optionId in options) {
 		const o = options[optionId];
 		if (o.type === 'subcommand') {
@@ -229,7 +231,8 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 			options[optionId] = command.options[optionId];
 		}
 		const newArgs = args.filter(a => a !== firstArg);
-		const subcommandOptions = parseArgs(newArgs, options, errorReporter);
+		const reporter = errorReporter.getSubcommandReporter ? errorReporter.getSubcommandReporter(firstArg) : undefined;
+		const subcommandOptions = parseArgs(newArgs, options, reporter);
 		return <T>{
 			[firstArg]: subcommandOptions
 		};
